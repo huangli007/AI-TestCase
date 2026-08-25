@@ -20,9 +20,9 @@ from PySide6.QtCore import QSize, Qt, Signal
 from PySide6.QtGui import QColor, QFont
 from PySide6.QtWidgets import (
     QAbstractItemView, QApplication, QCheckBox, QComboBox, QDoubleSpinBox, QFileDialog,
-    QHBoxLayout, QHeaderView, QLabel, QLineEdit, QListWidget, QListWidgetItem, QMainWindow,
-    QMessageBox, QPlainTextEdit, QProgressBar, QPushButton, QStatusBar, QTableWidget,
-    QTableWidgetItem, QTabWidget, QVBoxLayout, QWidget,
+    QHBoxLayout, QHeaderView, QInputDialog, QLabel, QLineEdit, QListWidget, QListWidgetItem,
+    QMainWindow, QMessageBox, QPlainTextEdit, QProgressBar, QPushButton, QStatusBar,
+    QTableWidget, QTableWidgetItem, QTabWidget, QVBoxLayout, QWidget,
 )
 
 # 国内主流 OpenAI 兼容厂家(联动 base_url / 文本模型 / 视觉模型)
@@ -107,8 +107,12 @@ class FileItemWidget(QWidget):
         lay.setContentsMargins(8, 4, 8, 4)
         lay.setSpacing(10)
 
-        t = _type_label(path)
-        color = TYPE_STYLE.get(t, "#888780")
+        is_url = path.strip().startswith(("http://", "https://"))
+        if is_url:
+            t, color = "URL", "#7C5CE0"
+        else:
+            t = _type_label(path)
+            color = TYPE_STYLE.get(t, "#888780")
         badge = QLabel(t)
         badge.setFixedSize(36, 22)
         badge.setAlignment(Qt.AlignmentFlag.AlignCenter)
@@ -118,15 +122,24 @@ class FileItemWidget(QWidget):
         )
         lay.addWidget(badge)
 
-        name = QLabel(os.path.basename(path))
+        # 链接显示域名,文件显示文件名
+        if is_url:
+            display = path.split("//")[-1][:48]
+        else:
+            display = os.path.basename(path)
+        name = QLabel(display)
         name.setStyleSheet("color:#1F2329;font-size:13px;")
         name.setMinimumWidth(120)
+        name.setToolTip(path)
         lay.addWidget(name, 1)
 
-        try:
-            sz = _human_size(os.path.getsize(path))
-        except OSError:
-            sz = ""
+        if is_url:
+            sz = "在线原型"
+        else:
+            try:
+                sz = _human_size(os.path.getsize(path))
+            except OSError:
+                sz = ""
         size_lbl = QLabel(sz)
         size_lbl.setStyleSheet("color:#9AA1AC;font-size:11px;")
         size_lbl.setMinimumWidth(60)
@@ -378,11 +391,14 @@ class MainWindow(QMainWindow):
         btns = QHBoxLayout()
         b_add = QPushButton("+ 添加文件")
         b_add.clicked.connect(self._on_add_files)
+        b_link = QPushButton("🔗 链接")
+        b_link.setToolTip("添加 Figma / MasterGo 原型图分享链接,自动读取页面截图")
+        b_link.clicked.connect(self._on_add_link)
         b_rm = QPushButton("移除")
         b_rm.clicked.connect(self._on_remove_selected)
         b_clr = QPushButton("清空")
         b_clr.clicked.connect(self.file_list.clear)
-        for b in (b_add, b_rm, b_clr):
+        for b in (b_add, b_link, b_rm, b_clr):
             btns.addWidget(b)
         lay.addLayout(btns)
 
@@ -505,6 +521,18 @@ class MainWindow(QMainWindow):
         self._chk_mock = QCheckBox("离线演示模式(Mock,免 Key)")
         o_lay.addWidget(self._chk_review)
         o_lay.addWidget(self._chk_mock)
+
+        # 原型图平台 Token(可选,用于读取 Figma/MasterGo 链接截图)
+        self._in_figma_token = QLineEdit()
+        self._in_figma_token.setPlaceholderText("可选:Figma 生成的 Personal Access Token")
+        self._in_figma_token.setEchoMode(QLineEdit.EchoMode.Password)
+        self._in_mastergo_token = QLineEdit()
+        self._in_mastergo_token.setPlaceholderText("可选:MasterGo 开放平台 Token")
+        self._in_mastergo_token.setEchoMode(QLineEdit.EchoMode.Password)
+        o_lay.addWidget(_label("Figma Token(读取原型图)"))
+        o_lay.addWidget(self._in_figma_token)
+        o_lay.addWidget(_label("MasterGo Token(读取原型图)"))
+        o_lay.addWidget(self._in_mastergo_token)
         lay.addWidget(o_card)
 
         # ---- 运行状态卡片 ----
@@ -675,7 +703,8 @@ class MainWindow(QMainWindow):
         existing = {self.file_list.item(i).data(Qt.ItemDataRole.UserRole)
                     for i in range(self.file_list.count())}
         for p in paths:
-            if p in existing or not os.path.exists(p):
+            is_url = p.strip().startswith(("http://", "https://"))
+            if p in existing or (not is_url and not os.path.exists(p)):
                 continue
             item = QListWidgetItem(self.file_list)
             item.setData(Qt.ItemDataRole.UserRole, p)
@@ -692,6 +721,14 @@ class MainWindow(QMainWindow):
         if item is not None:
             self.file_list.takeItem(self.file_list.row(item))
             self._count_lbl.setText(str(self.file_list.count()))
+
+    def _on_add_link(self):
+        """弹出输入框粘贴原型图链接(Figma / MasterGo)。"""
+        url, ok = QInputDialog.getText(
+            self, "添加原型图链接",
+            "粘贴 Figma / MasterGo 原型图分享链接:\n(读取页面截图作为素材,提高测试用例准确度)")
+        if ok and url.strip():
+            self._add_files([url.strip()])
 
     def _on_add_files(self):
         paths, _ = QFileDialog.getOpenFileNames(
@@ -727,6 +764,8 @@ class MainWindow(QMainWindow):
         cfg.llm.temperature = self._in_temp.value()
         cfg.pipeline.review_enabled = self._chk_review.isChecked()
         cfg.pipeline.mock_mode = self._chk_mock.isChecked()
+        cfg.prototype.figma_token = self._in_figma_token.text().strip()
+        cfg.prototype.mastergo_token = self._in_mastergo_token.text().strip()
         self._output_dir = self._in_outdir.text().strip() or "output"
         return cfg
 

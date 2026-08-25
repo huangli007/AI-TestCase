@@ -20,3 +20,7 @@ pipeline:
 
 export:
   formats: [xlsx, md, json]
+
+prototype:
+  figma_token: ${FIGMA_TOKEN:}        # 可选:读取 Figma 原型图链接截图(账户设置 → Security → Personal Access Token)
+  mastergo_token: ${MASTERGO_TOKEN:}  # 可选:MasterGo 开放平台 Token(未配置时尝试浏览器截图)

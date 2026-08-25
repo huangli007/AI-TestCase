@@ -65,10 +65,19 @@ class ExportConfig:
 
 
 @dataclass
+class PrototypeConfig:
+    """原型图平台凭证(用于读取 Figma / MasterGo 链接截图)。"""
+
+    figma_token: str = ""       # Figma Personal Access Token(可留空,降级浏览器截图)
+    mastergo_token: str = ""    # MasterGo 开放平台凭证(预留,浏览器截图为主)
+
+
+@dataclass
 class AppConfig:
     llm: LLMConfig = field(default_factory=LLMConfig)
     pipeline: PipelineConfig = field(default_factory=PipelineConfig)
     export: ExportConfig = field(default_factory=ExportConfig)
+    prototype: PrototypeConfig = field(default_factory=PrototypeConfig)
 
     @classmethod
     def load(cls, path: Optional[str] = None) -> "AppConfig":
@@ -82,6 +91,7 @@ class AppConfig:
         llm_raw = raw.get("llm", {})
         pipe_raw = raw.get("pipeline", {})
         exp_raw = raw.get("export", {})
+        proto_raw = raw.get("prototype", {})
 
         llm = LLMConfig(
             base_url=llm_raw.get("base_url", os.environ.get("LLM_BASE_URL", LLMConfig.base_url)),
@@ -104,4 +114,9 @@ class AppConfig:
 
         export = ExportConfig(formats=exp_raw.get("formats") or ["xlsx", "md", "json"])
 
-        return cls(llm=llm, pipeline=pipeline, export=export)
+        prototype = PrototypeConfig(
+            figma_token=proto_raw.get("figma_token", os.environ.get("FIGMA_TOKEN", "")),
+            mastergo_token=proto_raw.get("mastergo_token", os.environ.get("MASTERGO_TOKEN", "")),
+        )
+
+        return cls(llm=llm, pipeline=pipeline, export=export, prototype=prototype)

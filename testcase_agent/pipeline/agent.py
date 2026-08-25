@@ -13,6 +13,7 @@ from ..config import AppConfig
 from ..llm import LLMClient, LLMError, MockLLMClient
 from ..parsers import analyze_images, analyze_video, extract_text
 from ..parsers.image_parser import is_image
+from ..parsers.prototype_link import fetch_prototype_screenshots, is_prototype_url
 from ..parsers.video_parser import is_video
 from .analyzer import Analyzer
 from .generator import Generator
@@ -53,13 +54,15 @@ class TestCaseAgent:
 
     # ------------------------------------------------------------------ #
     def parse_files(self, file_paths: List[str], work_dir: Optional[str] = None) -> ParseResult:
-        """解析多模态文件为统一的文本素材。"""
+        """解析多模态文件与原型图链接为统一的文本素材。"""
         result = ParseResult()
         work_dir = work_dir or tempfile.mkdtemp(prefix="testcase_agent_")
-        image_paths, video_paths, text_paths = [], [], []
+        image_paths, video_paths, text_paths, link_urls = [], [], [], []
 
         for p in file_paths:
-            if not os.path.exists(p):
+            if p.strip().startswith(("http://", "https://")):
+                link_urls.append(p.strip())
+            elif not os.path.exists(p):
                 result.errors.append(f"文件不存在: {p}")
             elif is_image(p):
                 image_paths.append(p)
@@ -67,6 +70,33 @@ class TestCaseAgent:
                 video_paths.append(p)
             else:
                 text_paths.append(p)
+
+        # 0) 原型图链接(Figma / MasterGo)→ 拉取页面截图后走视觉分析
+        if link_urls:
+            proto_images: List[str] = []
+            for url in link_urls:
+                if is_prototype_url(url):
+                    self._progress(f"读取原型图链接: {url}")
+                    shots, errs = fetch_prototype_screenshots(
+                        url, work_dir,
+                        figma_token=self.cfg.prototype.figma_token,
+                        mastergo_token=self.cfg.prototype.mastergo_token,
+                    )
+                    proto_images.extend(shots)
+                    for e in errs:
+                        result.errors.append(f"{url}: {e}")
+                else:
+                    result.errors.append(f"不支持的链接(仅支持 Figma/MasterGo 原型图): {url}")
+            if proto_images:
+                self._progress(f"分析 {len(proto_images)} 张原型图截图(视觉模型)...")
+                try:
+                    descs = analyze_images(proto_images, self.llm, self.cfg.pipeline)
+                    for d in descs:
+                        result.materials.append(d)
+                    result.parsed_files.extend(proto_images)
+                except Exception as e:  # noqa: BLE001
+                    result.errors.append(f"原型图截图分析失败: {e}")
+                    logger.error("原型图截图分析失败: %s", e)
 
         # 1) 文本
         for p in text_paths:

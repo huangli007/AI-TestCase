@@ -121,6 +121,15 @@ class TestGuiSmoke:
         assert len(win._export_buttons) == 3
         win.close()
 
+    def test_add_prototype_link(self, qapp):
+        """添加原型图链接应显示 URL 徽标条目。"""
+        win = MainWindow()
+        win._add_files(["https://www.figma.com/design/AbC123XyZ/demo"])
+        assert win.file_list.count() == 1
+        item = win.file_list.item(0)
+        assert item.data(Qt.ItemDataRole.UserRole) == "https://www.figma.com/design/AbC123XyZ/demo"
+        win.close()
+
     def test_stage_done_fills_tabs_progressively(self, qapp, sample_result):
         """stage_done 实时填充应让各 tab 增量更新。"""
         win = MainWindow()
