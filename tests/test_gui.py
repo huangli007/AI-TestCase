@@ -130,6 +130,26 @@ class TestGuiSmoke:
         assert item.data(Qt.ItemDataRole.UserRole) == "https://www.figma.com/design/AbC123XyZ/demo"
         win.close()
 
+    def test_set_running_disables_materials_config(self, qapp):
+        """生成中应禁用素材页与配置页(防误改),导航仍可切。"""
+        win = MainWindow()
+        win._set_running(True)
+        assert not win._page_materials.isEnabled()
+        assert not win._page_config.isEnabled()
+        assert win._btn_run.text() == "生成中…"
+        win._set_running(False)
+        assert win._page_materials.isEnabled()
+        assert win._page_config.isEnabled()
+        win.close()
+
+    def test_nav_items_have_icons(self, qapp):
+        """导航项应带有自绘图标(商用级视觉)。"""
+        win = MainWindow()
+        assert len(win._nav_items) == 4
+        for b in win._nav_items:
+            assert not b.icon().isNull(), "导航项缺少图标"
+        win.close()
+
     def test_stage_done_fills_tabs_progressively(self, qapp, sample_result):
         """stage_done 实时填充应让各 tab 增量更新。"""
         win = MainWindow()

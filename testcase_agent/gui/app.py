@@ -17,7 +17,7 @@ from pathlib import Path
 from typing import List, Optional
 
 from PySide6.QtCore import QSize, Qt, Signal
-from PySide6.QtGui import QColor, QFont
+from PySide6.QtGui import QColor, QFont, QIcon, QPixmap
 from PySide6.QtWidgets import (
     QAbstractItemView, QApplication, QCheckBox, QComboBox, QDoubleSpinBox, QFileDialog,
     QFrame, QHBoxLayout, QHeaderView, QInputDialog, QLabel, QLineEdit, QListWidget,
@@ -64,21 +64,55 @@ PROVIDERS = [
 ]
 _PROVIDER_INDEX = {p["name"]: i for i, p in enumerate(PROVIDERS)}
 
-# 导航项样式(active 高亮:浅蓝底 + 左侧蓝条)
+# 导航项样式(配色与主色 #2F4FC4 统一;active 高亮:浅靛蓝底 + 左侧靛蓝条)
 NAV_STYLE = """
 QPushButton#NavItem {
     text-align: left; padding-left: 14px;
     border: none; border-radius: 6px;
-    background: transparent; color: #444441;
+    background: transparent; color: #4A5568;
     font-size: 13px; font-weight: 500;
 }
 QPushButton#NavItem:checked {
-    background: #E6F1FB; color: #0C447C;
-    border-left: 3px solid #378ADD;
+    background: #EAF0FE; color: #2F4FC4;
+    border-left: 3px solid #2F4FC4;
 }
-QPushButton#NavItem:hover { background: #ECEAE3; }
-QPushButton#NavItem:hover:checked { background: #E6F1FB; }
+QPushButton#NavItem:hover { background: #F0F2F5; }
+QPushButton#NavItem:hover:checked { background: #EAF0FE; }
+QPushButton#NavItem:disabled { color: #B4BAC3; }
 """
+
+
+def _make_nav_icon(kind: int) -> "QIcon":
+    """自绘 4 个导航线性图标(20x20,主色灰,active 时由 QSS 文字色联动)。"""
+    from PySide6.QtCore import QLineF, QPointF, QRectF, Qt
+    from PySide6.QtGui import QColor, QIcon, QPainter, QPen, QPolygonF
+    pm = QPixmap(20, 20)
+    pm.fill(Qt.GlobalColor.transparent)
+    p = QPainter(pm)
+    p.setRenderHint(QPainter.RenderHint.Antialiasing, True)
+    pen = QPen(QColor("#6B7280"), 1.6)
+    pen.setCapStyle(Qt.PenCapStyle.RoundCap)
+    pen.setJoinStyle(Qt.PenJoinStyle.RoundJoin)
+    p.setPen(pen)
+    p.setBrush(Qt.BrushStyle.NoBrush)
+    if kind == 0:  # 素材:文件夹
+        poly = QPolygonF([QPointF(3, 7), QPointF(7, 7), QPointF(9, 9),
+                          QPointF(17, 9), QPointF(17, 16), QPointF(3, 16)])
+        p.drawPolygon(poly)
+    elif kind == 1:  # 配置:滑块(三条横线带圆点)
+        for y, cx in ((6, 14), (10, 7), (14, 13)):
+            p.drawLine(QLineF(3, y, 17, y))
+            p.setBrush(QColor("#6B7280"))
+            p.drawEllipse(QRectF(cx - 2, y - 2, 4, 4))
+            p.setBrush(Qt.BrushStyle.NoBrush)
+    elif kind == 2:  # 运行:三角形播放
+        p.drawPolygon(QPolygonF([QPointF(6, 4), QPointF(16, 10), QPointF(6, 16)]))
+    elif kind == 3:  # 结果:柱状图
+        p.drawRect(QRectF(4, 11, 3, 5))
+        p.drawRect(QRectF(8.5, 7, 3, 9))
+        p.drawRect(QRectF(13, 9, 3, 7))
+    p.end()
+    return QIcon(pm)
 
 from .. import models
 from ..config import AppConfig
@@ -409,6 +443,8 @@ class MainWindow(QMainWindow):
             b.setObjectName("NavItem")
             b.setCheckable(True)
             b.setMinimumHeight(56)
+            b.setIcon(_make_nav_icon(i))
+            b.setIconSize(QSize(20, 20))
             b.setCursor(Qt.CursorShape.PointingHandCursor)
             b.clicked.connect(lambda _=False, idx=i: self._on_nav_clicked(idx))
             self._nav_items.append(b)
@@ -419,8 +455,10 @@ class MainWindow(QMainWindow):
     def _build_stacked(self) -> QWidget:
         """右侧主区域:按导航切换 4 个模块页。"""
         self._stacked = QStackedWidget()
-        self._stacked.addWidget(self._build_page_materials())
-        self._stacked.addWidget(self._build_page_config())
+        self._page_materials = self._build_page_materials()
+        self._page_config = self._build_page_config()
+        self._stacked.addWidget(self._page_materials)
+        self._stacked.addWidget(self._page_config)
         self._stacked.addWidget(self._build_page_run())
         self._stacked.addWidget(self._build_page_result())
         return self._stacked
@@ -434,7 +472,7 @@ class MainWindow(QMainWindow):
         head = QHBoxLayout()
         head.addWidget(_page_title("素材"))
         self._count_lbl = QLabel("0")
-        self._count_lbl.setStyleSheet("color:#378ADD;font-size:13px;font-weight:500;")
+        self._count_lbl.setStyleSheet("color:#2F4FC4;font-size:13px;font-weight:500;")
         head.addWidget(self._count_lbl)
         head.addStretch(1)
         lay.addLayout(head)
@@ -461,6 +499,16 @@ class MainWindow(QMainWindow):
         hint.setStyleSheet("color:#8A919E;font-size:11px;border:1px dashed #CDD3DB;border-radius:8px;padding:8px;background:#FBFBFC;")
         hint.setAlignment(Qt.AlignmentFlag.AlignCenter)
         lay.addWidget(hint)
+
+        # 向导引导:前往配置页
+        next_row = QHBoxLayout()
+        next_row.addStretch(1)
+        b_next = QPushButton("下一步:配置 →")
+        b_next.setObjectName("GhostButton")
+        b_next.setCursor(Qt.CursorShape.PointingHandCursor)
+        b_next.clicked.connect(lambda: self._on_nav_clicked(1))
+        next_row.addWidget(b_next)
+        lay.addLayout(next_row)
         return page
 
     def _build_page_config(self) -> QWidget:
@@ -600,6 +648,16 @@ class MainWindow(QMainWindow):
             tok_row.addLayout(col)
         o_lay.addLayout(tok_row)
         lay.addWidget(o_card)
+
+        # 向导引导:前往运行页
+        next_row = QHBoxLayout()
+        next_row.addStretch(1)
+        b_next = QPushButton("下一步:运行 →")
+        b_next.setObjectName("GhostButton")
+        b_next.setCursor(Qt.CursorShape.PointingHandCursor)
+        b_next.clicked.connect(lambda: self._on_nav_clicked(2))
+        next_row.addWidget(b_next)
+        lay.addLayout(next_row)
 
         lay.addStretch(1)
         scroll.setWidget(inner)
@@ -1004,7 +1062,11 @@ class MainWindow(QMainWindow):
     def _set_running(self, running: bool):
         self._btn_run.setEnabled(not running)
         self._btn_run.setText("生成中…" if running else "开始生成")
-        self.file_list.setEnabled(not running)
+        # 生成中禁用素材页与配置页(防误改);导航仍可切到运行/结果页查看
+        if hasattr(self, "_page_materials"):
+            self._page_materials.setEnabled(not running)
+        if hasattr(self, "_page_config"):
+            self._page_config.setEnabled(not running)
 
     def _apply_status(self, text: str, ok: bool):
         color = "#0F8A6B" if ok else "#C0392B"
