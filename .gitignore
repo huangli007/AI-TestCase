@@ -13,9 +13,12 @@ htmlcov/
 # ============ 构建 / 打包产物 ============
 build/
 build_pkg*/
+build_v2/
 dist/
 dist_pkg*/
 dist_final/
+dist_v2/
+dist_v*/
 *.spec.bak
 
 # ============ 安装程序产物 ============

@@ -17,7 +17,7 @@ from PySide6.QtWidgets import QApplication  # noqa: E402
 
 from testcase_agent import models  # noqa: E402
 from testcase_agent.gui import platform  # noqa: E402
-from testcase_agent.gui.app import MainWindow  # noqa: E402
+from testcase_agent.gui.app import MainWindow, NAV_STYLE  # noqa: E402
 from testcase_agent.gui.ui import QSS  # noqa: E402
 
 
@@ -98,8 +98,8 @@ def main() -> int:
     platform.apply_default_font(app)
 
     win = MainWindow()
-    win.setStyleSheet(QSS)
-    win.resize(1180, 860)
+    win.setStyleSheet(QSS + NAV_STYLE)
+    win.resize(1320, 920)
     win.show()
 
     # 填充示例素材(用临时目录,避免污染真实 samples/)
@@ -112,12 +112,13 @@ def main() -> int:
         sample_files.append(str(p))
     win._add_files(sample_files)  # noqa: SLF001
 
-    # 填充示例结果
+    # 填充示例结果并切到结果页展示
     win._populate_result(_sample_result())  # noqa: SLF001
-    win._stage_text.setText("阶段 3/3: 质量评审,补漏修正…")
-    win._progress.setValue(66)
-    win._steps.set_current(2)
-    win._apply_status("运行中", ok=True)
+    win._stage_text.setText("全部完成 ✓")
+    win._progress.setValue(100)
+    win._steps.set_current(3)
+    win._apply_status("完成", ok=True)
+    win._on_nav_clicked(3)  # noqa: SLF001  展示结果页
 
     win.grab().save(out)
     print(f"截图已保存: {os.path.abspath(out)}")

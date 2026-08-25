@@ -22,8 +22,8 @@ from PySide6.QtWidgets import (
     QAbstractItemView, QApplication, QCheckBox, QComboBox, QDoubleSpinBox, QFileDialog,
     QFrame, QHBoxLayout, QHeaderView, QInputDialog, QLabel, QLineEdit, QListWidget,
     QListWidgetItem, QMainWindow, QMessageBox, QPlainTextEdit, QProgressBar, QPushButton,
-    QScrollArea, QStatusBar, QTableWidget, QTableWidgetItem, QTabWidget, QVBoxLayout,
-    QWidget,
+    QScrollArea, QStackedWidget, QStatusBar, QTableWidget, QTableWidgetItem, QTabWidget,
+    QVBoxLayout, QWidget,
 )
 
 # 国内主流 OpenAI 兼容厂家(联动 base_url / 文本模型 / 视觉模型)
@@ -63,6 +63,22 @@ PROVIDERS = [
     {"name": "自定义…", "base_url": "", "text_models": [], "vision_models": []},
 ]
 _PROVIDER_INDEX = {p["name"]: i for i, p in enumerate(PROVIDERS)}
+
+# 导航项样式(active 高亮:浅蓝底 + 左侧蓝条)
+NAV_STYLE = """
+QPushButton#NavItem {
+    text-align: left; padding-left: 14px;
+    border: none; border-radius: 6px;
+    background: transparent; color: #444441;
+    font-size: 13px; font-weight: 500;
+}
+QPushButton#NavItem:checked {
+    background: #E6F1FB; color: #0C447C;
+    border-left: 3px solid #378ADD;
+}
+QPushButton#NavItem:hover { background: #ECEAE3; }
+QPushButton#NavItem:hover:checked { background: #E6F1FB; }
+"""
 
 from .. import models
 from ..config import AppConfig
@@ -290,6 +306,13 @@ def _label(text: str) -> QLabel:
     return lbl
 
 
+def _page_title(text: str) -> QLabel:
+    """模块页面大标题。"""
+    lbl = QLabel(text)
+    lbl.setStyleSheet("font-size:16px;font-weight:600;color:#1F2329;")
+    return lbl
+
+
 class MainWindow(QMainWindow):
     def __init__(self):
         super().__init__()
@@ -301,6 +324,9 @@ class MainWindow(QMainWindow):
         self._result: Optional[models.GenerationResult] = None
         self._worker: Optional[AgentWorker] = None
         self._output_dir: str = "output"
+        self._nav_items: List[QPushButton] = []
+        self._cur_stage = 0
+        self._total_stage = 3
 
         central = QWidget()
         self.setCentralWidget(central)
@@ -311,18 +337,18 @@ class MainWindow(QMainWindow):
         root.addWidget(self._build_header())
         body = QWidget()
         body_lay = QHBoxLayout(body)
-        body_lay.setContentsMargins(16, 14, 16, 8)
-        body_lay.setSpacing(16)
-        body_lay.addWidget(self._build_left_panel(), 5)
-        body_lay.addWidget(self._build_right_panel(), 8)
-        # 配置区(body)优先占高度,结果区(tabs)生成前较小
-        root.addWidget(body, 8)
-        root.addWidget(self._build_tabs(), 3)
-        self.setStatusBar(QStatusBar())
+        body_lay.setContentsMargins(0, 0, 0, 0)
+        body_lay.setSpacing(0)
+        body_lay.addWidget(self._build_nav())
+        body_lay.addWidget(self._build_stacked(), 1)
+        root.addWidget(body, 1)
 
-        self.setStyleSheet(QSS)
+        self.setStatusBar(QStatusBar())
+        self.setStyleSheet(QSS + NAV_STYLE)
         self._apply_status("就绪", ok=True)
         self._refresh_export_buttons()
+        self._on_nav_clicked(0)
+        self._update_nav_state()
 
     # ------------------------------------------------------------------ #
     # 构建
@@ -367,24 +393,51 @@ class MainWindow(QMainWindow):
         btn_load = QPushButton("加载配置")
         btn_load.clicked.connect(self._load_config)
         lay.addWidget(btn_load)
-
-        self._btn_run = QPushButton("开始生成")
-        self._btn_run.setObjectName("PrimaryButton")
-        self._btn_run.clicked.connect(self._on_run)
-        lay.addWidget(self._btn_run)
         return bar
 
-    def _build_left_panel(self) -> QWidget:
-        card, lay = _card("素材")
+    def _build_nav(self) -> QWidget:
+        """左侧模块导航栏。"""
+        nav = QWidget()
+        nav.setFixedWidth(140)
+        nav.setObjectName("NavPanel")
+        nav.setStyleSheet("QWidget#NavPanel{background:#F1EFE8;border-right:1px solid #E5E7EB;}")
+        lay = QVBoxLayout(nav)
+        lay.setContentsMargins(8, 14, 8, 14)
+        lay.setSpacing(6)
+        for i, t in enumerate(["素材", "配置", "运行", "结果"]):
+            b = QPushButton(t)
+            b.setObjectName("NavItem")
+            b.setCheckable(True)
+            b.setMinimumHeight(56)
+            b.setCursor(Qt.CursorShape.PointingHandCursor)
+            b.clicked.connect(lambda _=False, idx=i: self._on_nav_clicked(idx))
+            self._nav_items.append(b)
+            lay.addWidget(b)
+        lay.addStretch(1)
+        return nav
 
+    def _build_stacked(self) -> QWidget:
+        """右侧主区域:按导航切换 4 个模块页。"""
+        self._stacked = QStackedWidget()
+        self._stacked.addWidget(self._build_page_materials())
+        self._stacked.addWidget(self._build_page_config())
+        self._stacked.addWidget(self._build_page_run())
+        self._stacked.addWidget(self._build_page_result())
+        return self._stacked
+
+    def _build_page_materials(self) -> QWidget:
+        """素材页:文件列表 + 添加/链接/移除。"""
+        page = QWidget()
+        lay = QVBoxLayout(page)
+        lay.setContentsMargins(20, 16, 20, 16)
+        lay.setSpacing(12)
+        head = QHBoxLayout()
+        head.addWidget(_page_title("素材"))
         self._count_lbl = QLabel("0")
-        self._count_lbl.setObjectName("CardCount")
-        card_title_row = QHBoxLayout()
-        card_title_row.addWidget(QLabel("素材"))
-        card_title_row.addWidget(self._count_lbl)
-        card_title_row.addStretch(1)
-        lay.removeWidget(lay.itemAt(0).widget())
-        lay.insertLayout(0, card_title_row)
+        self._count_lbl.setStyleSheet("color:#378ADD;font-size:13px;font-weight:500;")
+        head.addWidget(self._count_lbl)
+        head.addStretch(1)
+        lay.addLayout(head)
 
         self.file_list = FileListWidget()
         self.file_list.files_dropped.connect(self._add_files)
@@ -404,29 +457,23 @@ class MainWindow(QMainWindow):
             btns.addWidget(b)
         lay.addLayout(btns)
 
-        hint = QLabel("拖拽文件到列表,或点击添加")
-        hint.setStyleSheet("color:#8A919E;font-size:12px;border:1px dashed #CDD3DB;border-radius:8px;padding:10px;background:#FBFBFC;")
+        hint = QLabel("拖拽文件到列表,或点击添加 · 支持 Figma / MasterGo 原型图链接")
+        hint.setStyleSheet("color:#8A919E;font-size:11px;border:1px dashed #CDD3DB;border-radius:8px;padding:8px;background:#FBFBFC;")
         hint.setAlignment(Qt.AlignmentFlag.AlignCenter)
         lay.addWidget(hint)
+        return page
 
-        fmt = QLabel("支持 txt / md / docx / pdf / csv · png / jpg · mp4 / mov")
-        fmt.setStyleSheet("color:#9AA1AC;font-size:11px;")
-        fmt.setWordWrap(True)
-        lay.addWidget(fmt)
-        return card
-
-    def _build_right_panel(self) -> QWidget:
-        # 外层滚动容器:内容超出窗口高度时可滚动,保证任何屏幕尺寸都不遮挡
+    def _build_page_config(self) -> QWidget:
+        """配置页:模型配置 + 运行选项(可滚动)。"""
         scroll = QScrollArea()
         scroll.setWidgetResizable(True)
         scroll.setFrameShape(QFrame.Shape.NoFrame)
         scroll.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
-        scroll.setMinimumWidth(400)
-
-        panel = QWidget()
-        lay = QVBoxLayout(panel)
-        lay.setContentsMargins(0, 0, 0, 0)
-        lay.setSpacing(8)
+        inner = QWidget()
+        lay = QVBoxLayout(inner)
+        lay.setContentsMargins(20, 16, 20, 16)
+        lay.setSpacing(12)
+        lay.addWidget(_page_title("配置"))
 
         # ---- 模型配置卡片(不内置任何 API 配置,全部由用户选择/填写) ----
         m_card, m_lay = _card("模型配置")
@@ -529,7 +576,6 @@ class MainWindow(QMainWindow):
         self._chk_review = QCheckBox("质量评审(补漏 / 去重 / 修正)")
         self._chk_review.setChecked(True)
         self._chk_mock = QCheckBox("离线演示模式(Mock,免 Key)")
-        # 复选框并排一行
         chk_row = QHBoxLayout()
         chk_row.setSpacing(16)
         chk_row.addWidget(self._chk_review)
@@ -555,25 +601,56 @@ class MainWindow(QMainWindow):
         o_lay.addLayout(tok_row)
         lay.addWidget(o_card)
 
-        # ---- 运行状态卡片 ----
-        s_card, s_lay = _card("运行状态")
+        lay.addStretch(1)
+        scroll.setWidget(inner)
+        return scroll
+
+    def _build_page_run(self) -> QWidget:
+        """运行页:步骤指示 + 进度 + 阶段文本 + 大开始按钮 + 实时日志。"""
+        page = QWidget()
+        lay = QVBoxLayout(page)
+        lay.setContentsMargins(20, 16, 20, 16)
+        lay.setSpacing(14)
+        lay.addWidget(_page_title("运行"))
+
         self._steps = StepIndicator()
-        s_lay.addWidget(self._steps)
+        lay.addWidget(self._steps)
+
         self._progress = QProgressBar()
         self._progress.setRange(0, 100)
         self._progress.setValue(0)
         self._progress.setTextVisible(False)
-        s_lay.addWidget(self._progress)
+        self._progress.setFixedHeight(8)
+        lay.addWidget(self._progress)
+
         self._stage_text = QLabel("等待开始…")
-        self._stage_text.setStyleSheet("color:#8A919E;font-size:12px;")
-        s_lay.addWidget(self._stage_text)
-        lay.addWidget(s_card)
+        self._stage_text.setStyleSheet("color:#8A919E;font-size:13px;font-weight:500;")
+        lay.addWidget(self._stage_text)
 
-        lay.addStretch(1)
-        scroll.setWidget(panel)
-        return scroll
+        lay.addWidget(_label("实时日志"))
+        self._log_view = QPlainTextEdit()
+        self._log_view.setReadOnly(True)
+        self._log_view.setStyleSheet(
+            "background:#FBFBFC;border:1px solid #E5E7EB;border-radius:6px;"
+            "font-family:Consolas,Menlo,monospace;font-size:11px;color:#5A6270;")
+        lay.addWidget(self._log_view, 1)
 
-    def _build_tabs(self) -> QWidget:
+        self._btn_run = QPushButton("开始生成")
+        self._btn_run.setObjectName("PrimaryButton")
+        self._btn_run.setMinimumHeight(44)
+        self._btn_run.setCursor(Qt.CursorShape.PointingHandCursor)
+        self._btn_run.clicked.connect(self._on_run)
+        lay.addWidget(self._btn_run)
+        return page
+
+    def _build_page_result(self) -> QWidget:
+        """结果页:产品分析 / 测试点 / 用例 / 评审 内部 tabs。"""
+        page = QWidget()
+        lay = QVBoxLayout(page)
+        lay.setContentsMargins(20, 16, 20, 16)
+        lay.setSpacing(10)
+        lay.addWidget(_page_title("结果"))
+
         self.tabs = QTabWidget()
 
         self._txt_analysis = QPlainTextEdit()
@@ -594,7 +671,8 @@ class MainWindow(QMainWindow):
         self._txt_review.setReadOnly(True)
         self.tabs.addTab(self._txt_review, "评审报告")
 
-        return self.tabs
+        lay.addWidget(self.tabs, 1)
+        return page
 
     @staticmethod
     def _setup_table(tbl: QTableWidget, widths: List[int]):
@@ -605,6 +683,28 @@ class MainWindow(QMainWindow):
         header.setSectionResizeMode(QHeaderView.ResizeMode.Interactive)
         for i, w in enumerate(widths):
             tbl.setColumnWidth(i, w)
+
+    # ------------------------------------------------------------------ #
+    # 导航切换与状态联动
+    # ------------------------------------------------------------------ #
+    def _on_nav_clicked(self, idx: int):
+        """点击导航项切换主区域页面。"""
+        if not hasattr(self, "_stacked"):
+            return
+        self._stacked.setCurrentIndex(idx)
+        for i, b in enumerate(self._nav_items):
+            b.setChecked(i == idx)
+
+    def _update_nav_state(self):
+        """更新导航项副标题:素材计数 / 运行进度 / 结果用例数。"""
+        if not self._nav_items:
+            return
+        n = self.file_list.count() if hasattr(self, "file_list") else 0
+        self._nav_items[0].setText(f"素材\n{n} 个文件")
+        self._nav_items[1].setText("配置\n模型 · 运行")
+        self._nav_items[2].setText(f"运行\n阶段 {self._cur_stage}/{self._total_stage}")
+        nc = len(self._result.cases) if self._result else 0
+        self._nav_items[3].setText(f"结果\n{nc} 条用例" if nc else "结果\n—")
 
     # ------------------------------------------------------------------ #
     # 主窗口拖拽支持(整窗口接收外部文件)
@@ -736,12 +836,14 @@ class MainWindow(QMainWindow):
             self.file_list.addItem(item)
             self.file_list.setItemWidget(item, widget)
         self._count_lbl.setText(str(self.file_list.count()))
+        self._update_nav_state()
         self.file_list.updateGeometry()
 
     def _on_remove_item(self, item):
         if item is not None:
             self.file_list.takeItem(self.file_list.row(item))
             self._count_lbl.setText(str(self.file_list.count()))
+            self._update_nav_state()
 
     def _on_add_link(self):
         """弹出输入框粘贴原型图链接(Figma / MasterGo)。"""
@@ -763,6 +865,7 @@ class MainWindow(QMainWindow):
         for item in self.file_list.selectedItems():
             self.file_list.takeItem(self.file_list.row(item))
         self._count_lbl.setText(str(self.file_list.count()))
+        self._update_nav_state()
 
     def _on_browse_outdir(self):
         d = QFileDialog.getExistingDirectory(self, "选择输出目录", self._in_outdir.text() or ".")
@@ -808,41 +911,63 @@ class MainWindow(QMainWindow):
         self._progress.setValue(0)
         self._steps.reset()
         self._stage_text.setText("正在解析素材…")
+        self._log_view.clear()
+        self._cur_stage = 0
+        self._update_nav_state()
+        self._on_nav_clicked(2)  # 切到运行页
         self.statusBar().showMessage("开始生成…")
 
         self._worker = AgentWorker(files, self._output_dir, cfg,
                                    review=None if cfg.pipeline.review_enabled else False)
         self._worker.stage.connect(self._on_stage)
-        self._worker.progress.connect(lambda msg: self.statusBar().showMessage(msg))
+        self._worker.progress.connect(self._on_progress)
         self._worker.stage_done.connect(self._on_stage_done)
         self._worker.finished_ok.connect(self._on_finished)
         self._worker.failed.connect(self._on_failed)
         self._worker.start()
 
+    def _on_progress(self, msg: str):
+        """进度消息:状态栏 + 实时日志 + 阶段解析更新导航。"""
+        self.statusBar().showMessage(msg)
+        self._log_view.appendPlainText(msg)
+        # 尝试解析阶段号更新导航
+        import re
+        m = re.search(r"阶段\s*(\d+)\s*/\s*(\d+)", msg)
+        if m:
+            self._cur_stage = int(m.group(1))
+            self._total_stage = int(m.group(2))
+            self._update_nav_state()
+
     def _on_stage(self, cur: int, total: int, name: str):
         self._steps.set_current(cur - 1)
         self._progress.setValue(int(cur * 100 / total))
         self._stage_text.setText(f"阶段 {cur}/{total}: {name}…")
+        self._cur_stage = cur
+        self._total_stage = total
+        self._update_nav_state()
 
     def _on_stage_done(self, stage: str, payload):
-        """分阶段实时填充 UI:分析完成→产品分析/测试点 tab,生成完成→用例 tab,评审完成→评审 + 最终用例。"""
+        """分阶段实时填充 UI:分析/生成/评审完成即填入对应 tab,并跳到结果页。"""
         if stage == "analysis":
             analysis = payload
             self._populate_analysis(analysis)
             self._populate_test_points(analysis.test_points)
             self.tabs.setCurrentIndex(0)
+            self._on_nav_clicked(3)  # 跳结果页
             self.statusBar().showMessage("阶段 1 完成:产品分析已生成")
         elif stage == "cases":
             analysis, cases = payload
             self._populate_test_points(analysis.test_points)
             self._populate_cases(cases)
             self.tabs.setCurrentIndex(2)
+            self._on_nav_clicked(3)
             self.statusBar().showMessage(f"阶段 2 完成:已生成 {len(cases)} 条用例")
         elif stage == "review":
             review = payload
             self._populate_cases(review.cases)
             self._populate_review(review)
             self.tabs.setCurrentIndex(3)
+            self._on_nav_clicked(3)
             self.statusBar().showMessage(
                 f"阶段 3 完成:补充 {len(review.gaps)} 遗漏点, 修正 {len(review.issues)} 问题")
 
@@ -852,10 +977,13 @@ class MainWindow(QMainWindow):
         self._progress.setValue(100)
         self._steps.set_current(len(StepIndicator.STEPS))
         self._stage_text.setText("全部完成 ✓")
+        self._cur_stage = self._total_stage
+        self._update_nav_state()
         self._apply_status("完成", ok=True)
         self._enable_export_buttons(True)
         # 兜底再填一次(评审或 fallback 路径下可能 stage_done 没覆盖)
         self._populate_result(result)
+        self._on_nav_clicked(3)  # 跳结果页
         self.statusBar().showMessage(
             f"产品「{result.product_name}」共 {len(result.cases)} 条用例,已导出至 {self._output_dir}")
 
@@ -864,6 +992,7 @@ class MainWindow(QMainWindow):
         self._progress.setValue(0)
         self._apply_status("失败", ok=False)
         self._stage_text.setText("生成失败")
+        self._log_view.appendPlainText(f"[错误] {err}")
         self.statusBar().showMessage("生成失败")
         hint = ""
         if "python-docx" in err or "pypdf" in err or "imageio-ffmpeg" in err:
