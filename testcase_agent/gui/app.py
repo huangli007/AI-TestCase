@@ -20,9 +20,10 @@ from PySide6.QtCore import QSize, Qt, Signal
 from PySide6.QtGui import QColor, QFont
 from PySide6.QtWidgets import (
     QAbstractItemView, QApplication, QCheckBox, QComboBox, QDoubleSpinBox, QFileDialog,
-    QHBoxLayout, QHeaderView, QInputDialog, QLabel, QLineEdit, QListWidget, QListWidgetItem,
-    QMainWindow, QMessageBox, QPlainTextEdit, QProgressBar, QPushButton, QStatusBar,
-    QTableWidget, QTableWidgetItem, QTabWidget, QVBoxLayout, QWidget,
+    QFrame, QHBoxLayout, QHeaderView, QInputDialog, QLabel, QLineEdit, QListWidget,
+    QListWidgetItem, QMainWindow, QMessageBox, QPlainTextEdit, QProgressBar, QPushButton,
+    QScrollArea, QStatusBar, QTableWidget, QTableWidgetItem, QTabWidget, QVBoxLayout,
+    QWidget,
 )
 
 # 国内主流 OpenAI 兼容厂家(联动 base_url / 文本模型 / 视觉模型)
@@ -271,8 +272,8 @@ def _card(title: str) -> tuple[QWidget, QVBoxLayout]:
     w = QWidget()
     w.setObjectName("Card")
     lay = QVBoxLayout(w)
-    lay.setContentsMargins(16, 12, 16, 12)
-    lay.setSpacing(8)
+    lay.setContentsMargins(14, 10, 14, 10)
+    lay.setSpacing(7)
     t = QLabel(title)
     t.setObjectName("CardTitle")
     t.setStyleSheet("font-size:14px;font-weight:600;color:#1F2329;margin-bottom:2px;")
@@ -314,8 +315,9 @@ class MainWindow(QMainWindow):
         body_lay.setSpacing(16)
         body_lay.addWidget(self._build_left_panel(), 5)
         body_lay.addWidget(self._build_right_panel(), 8)
-        root.addWidget(body, 4)
-        root.addWidget(self._build_tabs(), 5)
+        # 配置区(body)优先占高度,结果区(tabs)生成前较小
+        root.addWidget(body, 8)
+        root.addWidget(self._build_tabs(), 3)
         self.setStatusBar(QStatusBar())
 
         self.setStyleSheet(QSS)
@@ -414,10 +416,17 @@ class MainWindow(QMainWindow):
         return card
 
     def _build_right_panel(self) -> QWidget:
+        # 外层滚动容器:内容超出窗口高度时可滚动,保证任何屏幕尺寸都不遮挡
+        scroll = QScrollArea()
+        scroll.setWidgetResizable(True)
+        scroll.setFrameShape(QFrame.Shape.NoFrame)
+        scroll.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
+        scroll.setMinimumWidth(400)
+
         panel = QWidget()
         lay = QVBoxLayout(panel)
         lay.setContentsMargins(0, 0, 0, 0)
-        lay.setSpacing(12)
+        lay.setSpacing(8)
 
         # ---- 模型配置卡片(不内置任何 API 配置,全部由用户选择/填写) ----
         m_card, m_lay = _card("模型配置")
@@ -494,13 +503,14 @@ class MainWindow(QMainWindow):
         self._fetch_hint.setStyleSheet("color:#9AA1AC;font-size:11px;")
         self._fetch_hint.setWordWrap(True)
         self._fetch_hint.setMinimumWidth(0)
-        m_lay.addWidget(self._fetch_hint)
 
-        # 温度行
+        # 温度 + 拉取提示合并一行(节省垂直空间)
         temp_row = QHBoxLayout()
+        temp_row.setSpacing(8)
         temp_row.addWidget(_label("温度"))
         temp_row.addWidget(self._in_temp)
-        temp_row.addStretch(1)
+        temp_row.addSpacing(10)
+        temp_row.addWidget(self._fetch_hint, 1)
         m_lay.addLayout(temp_row)
         lay.addWidget(m_card)
 
@@ -519,20 +529,30 @@ class MainWindow(QMainWindow):
         self._chk_review = QCheckBox("质量评审(补漏 / 去重 / 修正)")
         self._chk_review.setChecked(True)
         self._chk_mock = QCheckBox("离线演示模式(Mock,免 Key)")
-        o_lay.addWidget(self._chk_review)
-        o_lay.addWidget(self._chk_mock)
+        # 复选框并排一行
+        chk_row = QHBoxLayout()
+        chk_row.setSpacing(16)
+        chk_row.addWidget(self._chk_review)
+        chk_row.addWidget(self._chk_mock)
+        chk_row.addStretch(1)
+        o_lay.addLayout(chk_row)
 
-        # 原型图平台 Token(可选,用于读取 Figma/MasterGo 链接截图)
+        # 原型图平台 Token(可选,并排一列,用于读取 Figma/MasterGo 链接截图)
         self._in_figma_token = QLineEdit()
-        self._in_figma_token.setPlaceholderText("可选:Figma 生成的 Personal Access Token")
+        self._in_figma_token.setPlaceholderText("Figma 个人访问令牌(可选)")
         self._in_figma_token.setEchoMode(QLineEdit.EchoMode.Password)
         self._in_mastergo_token = QLineEdit()
-        self._in_mastergo_token.setPlaceholderText("可选:MasterGo 开放平台 Token")
+        self._in_mastergo_token.setPlaceholderText("MasterGo 令牌(可选)")
         self._in_mastergo_token.setEchoMode(QLineEdit.EchoMode.Password)
-        o_lay.addWidget(_label("Figma Token(读取原型图)"))
-        o_lay.addWidget(self._in_figma_token)
-        o_lay.addWidget(_label("MasterGo Token(读取原型图)"))
-        o_lay.addWidget(self._in_mastergo_token)
+        tok_row = QHBoxLayout()
+        tok_row.setSpacing(10)
+        for lbl, w in (("Figma Token", self._in_figma_token), ("MasterGo Token", self._in_mastergo_token)):
+            col = QVBoxLayout()
+            col.setSpacing(4)
+            col.addWidget(_label(lbl))
+            col.addWidget(w)
+            tok_row.addLayout(col)
+        o_lay.addLayout(tok_row)
         lay.addWidget(o_card)
 
         # ---- 运行状态卡片 ----
@@ -550,7 +570,8 @@ class MainWindow(QMainWindow):
         lay.addWidget(s_card)
 
         lay.addStretch(1)
-        return panel
+        scroll.setWidget(panel)
+        return scroll
 
     def _build_tabs(self) -> QWidget:
         self.tabs = QTabWidget()
