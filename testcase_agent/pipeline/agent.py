@@ -13,7 +13,7 @@ from ..config import AppConfig
 from ..llm import LLMClient, LLMError, MockLLMClient
 from ..parsers import analyze_images, analyze_video, extract_text
 from ..parsers.image_parser import is_image
-from ..parsers.prototype_link import fetch_prototype_screenshots, is_prototype_url
+from ..parsers.prototype_link import fetch_prototype_screenshots
 from ..parsers.video_parser import is_video
 from .analyzer import Analyzer
 from .generator import Generator
@@ -71,22 +71,19 @@ class TestCaseAgent:
             else:
                 text_paths.append(p)
 
-        # 0) 原型图链接(Figma / MasterGo)→ 拉取页面截图后走视觉分析
+        # 0) 原型图/网页链接(Figma / MasterGo / 任意网页原型)→ 拉取页面截图后走视觉分析
         if link_urls:
             proto_images: List[str] = []
             for url in link_urls:
-                if is_prototype_url(url):
-                    self._progress(f"读取原型图链接: {url}")
-                    shots, errs = fetch_prototype_screenshots(
-                        url, work_dir,
-                        figma_token=self.cfg.prototype.figma_token,
-                        mastergo_token=self.cfg.prototype.mastergo_token,
-                    )
-                    proto_images.extend(shots)
-                    for e in errs:
-                        result.errors.append(f"{url}: {e}")
-                else:
-                    result.errors.append(f"不支持的链接(仅支持 Figma/MasterGo 原型图): {url}")
+                self._progress(f"读取链接: {url}")
+                shots, errs = fetch_prototype_screenshots(
+                    url, work_dir,
+                    figma_token=self.cfg.prototype.figma_token,
+                    mastergo_token=self.cfg.prototype.mastergo_token,
+                )
+                proto_images.extend(shots)
+                for e in errs:
+                    result.errors.append(f"{url}: {e}")
             if proto_images:
                 self._progress(f"分析 {len(proto_images)} 张原型图截图(视觉模型)...")
                 try:

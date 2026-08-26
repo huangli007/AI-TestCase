@@ -106,19 +106,41 @@ def fetch_figma_screenshots(url: str, token: str, work_dir: str) -> Tuple[List[s
 
 
 # ------------------------------------------------------------------ #
-# 浏览器截图(MasterGo 主路径 / Figma 无 Token 降级)
+# 浏览器截图(任意网页/Figma 无 Token 降级/MasterGo)
 # ------------------------------------------------------------------ #
 def browser_screenshot(url: str, out_path: str, timeout: int = 45) -> None:
-    """用 Playwright 无头浏览器打开链接并截全页图(懒加载依赖)。"""
+    """用 Playwright 无头浏览器截图。
+
+    启动顺序:系统 Edge -> 系统 Chrome -> Playwright Chromium,
+    优先用系统自带浏览器,无需打包/下载浏览器二进制。
+    """
     from playwright.sync_api import sync_playwright
     with sync_playwright() as p:
-        browser = p.chromium.launch(headless=True)
+        browser = None
+        last_err: Optional[Exception] = None
+        for kw in ({"channel": "msedge"}, {"channel": "chrome"}, {}):
+            try:
+                browser = p.chromium.launch(headless=True, **kw)
+                break
+            except Exception as e:  # noqa: BLE001
+                last_err = e
+        if browser is None:
+            raise RuntimeError(
+                f"找不到可用浏览器(Edge/Chrome/Playwright Chromium): {_short_err(last_err)}")
         try:
             page = browser.new_page(viewport={"width": 1440, "height": 900})
-            page.goto(url, wait_until="domcontentloaded", timeout=timeout * 1000)
-            # 等待画布渲染
-            page.wait_for_timeout(4000)
-            page.screenshot(path=out_path, full_page=False)
+            # 拦截字体/媒体请求 + 强制本地字体:避免慢资源/远程字体阻塞截图
+            page.route("**/*", lambda route: (
+                route.abort() if route.request.resource_type in ("font", "media")
+                else route.continue_()))
+            page.goto(url, wait_until="commit", timeout=min(timeout, 40) * 1000)
+            page.add_style_tag(content="*{font-family:'Segoe UI',Arial,sans-serif !important;}")
+            page.wait_for_timeout(6000)
+            try:
+                page.wait_for_selector("body", timeout=3000)
+            except Exception:  # noqa: BLE001
+                pass
+            page.screenshot(path=out_path, full_page=False, timeout=15000)
         finally:
             browser.close()
 
@@ -143,29 +165,30 @@ def fetch_mastergo_screenshots(url: str, work_dir: str) -> Tuple[List[str], List
 def fetch_prototype_screenshots(url: str, work_dir: str,
                                 figma_token: str = "", mastergo_token: str = ""
                                 ) -> Tuple[List[str], List[str]]:
-    """解析原型图链接并拉取截图。返回 (截图路径列表, 错误列表)。"""
+    """解析链接并拉取截图。返回 (截图路径列表, 错误列表)。
+
+    支持: Figma(有 Token 走 REST API,无则浏览器截图)、MasterGo、任意网页原型(浏览器截图)。
+    """
     try:
-        platform, _ = parse_prototype_url(url)
-    except ValueError as e:
-        return [], [str(e)]
+        platform, key = parse_prototype_url(url)
+    except ValueError:
+        platform, key = "web", "site"
 
-    if platform == "figma":
-        if figma_token:
-            return fetch_figma_screenshots(url, figma_token, work_dir)
-        # 无 Token:降级浏览器截图(需要 playwright)
-        try:
-            os.makedirs(work_dir, exist_ok=True)
-            _, key = parse_prototype_url(url)
-            out = os.path.join(work_dir, f"figma_{key[:6]}_01.png")
-            browser_screenshot(url, out)
-            return [out], []
-        except ImportError:
-            return [], ["读取 Figma 需要 Token(设置 → 运行选项 → Figma Token)或安装 playwright"]
-        except Exception as e:  # noqa: BLE001
-            return [], [f"Figma 截图失败: {_short_err(e)};建议配置 Figma Token"]
+    if platform == "figma" and figma_token:
+        return fetch_figma_screenshots(url, figma_token, work_dir)
 
-    # mastergo
-    return fetch_mastergo_screenshots(url, work_dir)
+    # 无 Token 或非 Figma:浏览器截图(优先系统 Edge,回退 Chromium)
+    os.makedirs(work_dir, exist_ok=True)
+    out = os.path.join(work_dir, f"{platform}_{key[:8]}_01.png")
+    try:
+        browser_screenshot(url, out)
+        return [out], []
+    except ImportError:
+        return [], ["读取该链接需要浏览器截图能力,请先安装: pip install playwright && playwright install chromium;"
+                    "或配置 Figma Token"]
+    except Exception as e:  # noqa: BLE001
+        return [], [f"{'Figma' if platform == 'figma' else '网页'}截图失败: {_short_err(e)};"
+                    "建议配置 Figma Token,或确认系统已安装 Edge/Chrome"]
 
 
 def _short_err(e: Exception, limit: int = 160) -> str:

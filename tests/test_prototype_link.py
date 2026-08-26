@@ -74,3 +74,26 @@ class TestFetchMastergo:
             "https://mastergo.com/file/Mg987Abc", str(tmp_path))
         assert len(paths) == 1 and Path(paths[0]).exists()
         assert errors == []
+
+
+class TestWebUrl:
+    def test_web_page_screenshot(self, tmp_path, monkeypatch):
+        """任意网页原型链接(GitHub Pages / H5 原型)也应支持浏览器截图。"""
+        def fake_shot(url, out, timeout=45):
+            Path(out).write_bytes(b"\x89PNG")
+        monkeypatch.setattr(
+            "testcase_agent.parsers.prototype_link.browser_screenshot", fake_shot)
+        paths, errors = fetch_prototype_screenshots(
+            "https://malstromnaef-afk.github.io/agent-pc/index.html?prototype=large", str(tmp_path))
+        assert len(paths) == 1 and Path(paths[0]).exists()
+        assert errors == []
+
+    def test_web_page_import_error_hint(self, tmp_path, monkeypatch):
+        """未安装 playwright 时给出安装提示(而非'不支持的链接')。"""
+        monkeypatch.setattr(
+            "testcase_agent.parsers.prototype_link.browser_screenshot",
+            lambda *a, **k: (_ for _ in ()).throw(ImportError("no playwright")))
+        paths, errors = fetch_prototype_screenshots(
+            "https://example.com/proto/index.html", str(tmp_path))
+        assert paths == []
+        assert any("playwright" in e for e in errors)
