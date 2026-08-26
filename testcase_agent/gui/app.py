@@ -1,11 +1,10 @@
-"""主窗口:按 v2 稿图实现的跨平台桌面界面。
+"""主窗口:按左侧栏模块布局实现的跨平台桌面界面(液态玻璃主题)。
 
 布局:
-  顶部工具栏(Logo / 标题 / 状态 / 保存配置 / 开始生成)
-  左列:输入素材卡片
-  右列:模型配置卡片 + 运行选项卡片 + 运行状态卡片
-  底部:结果选项卡(产品分析 / 测试点清单 / 测试用例 / 评审报告)
-  状态栏
+  顶部应用栏(Logo / 标题 / 状态 / 保存加载配置 / 窗口控制按钮)
+  左侧导航栏(素材 / 配置 / 运行 / 结果)
+  右侧主区域 QStackedWidget(4 个模块页)
+  底部状态栏(状态消息 / 导出按钮)
 """
 
 from __future__ import annotations
@@ -16,8 +15,8 @@ import sys
 from pathlib import Path
 from typing import List, Optional
 
-from PySide6.QtCore import QSize, Qt, Signal
-from PySide6.QtGui import QColor, QFont, QIcon, QPixmap
+from PySide6.QtCore import QPoint, QSize, Qt, Signal
+from PySide6.QtGui import QColor, QFont, QIcon, QKeySequence, QPixmap, QShortcut
 from PySide6.QtWidgets import (
     QAbstractItemView, QApplication, QCheckBox, QComboBox, QDoubleSpinBox, QFileDialog,
     QFrame, QHBoxLayout, QHeaderView, QInputDialog, QLabel, QLineEdit, QListWidget,
@@ -25,6 +24,9 @@ from PySide6.QtWidgets import (
     QScrollArea, QStackedWidget, QStatusBar, QTableWidget, QTableWidgetItem, QTabWidget,
     QVBoxLayout, QWidget,
 )
+
+from .ui import QSS
+from .ui.glass import BackgroundWidget
 
 # 国内主流 OpenAI 兼容厂家(联动 base_url / 文本模型 / 视觉模型)
 PROVIDERS = [
@@ -64,21 +66,21 @@ PROVIDERS = [
 ]
 _PROVIDER_INDEX = {p["name"]: i for i, p in enumerate(PROVIDERS)}
 
-# 导航项样式(配色与主色 #2F4FC4 统一;active 高亮:浅靛蓝底 + 左侧靛蓝条)
+# 导航项样式(液态玻璃:glass-1 底 + 左侧 3px 琥珀竖条,与主题 token 一致)
 NAV_STYLE = """
 QPushButton#NavItem {
-    text-align: left; padding-left: 14px;
+    text-align: left; padding-left: 16px;
     border: none; border-radius: 6px;
-    background: transparent; color: #4A5568;
+    background: transparent; color: rgba(255,255,255,170);
     font-size: 13px; font-weight: 500;
 }
 QPushButton#NavItem:checked {
-    background: #EAF0FE; color: #2F4FC4;
-    border-left: 3px solid #2F4FC4;
+    background: rgba(255,255,255,10); color: #FFD54F;
+    border-left: 3px solid #FFD54F;
 }
-QPushButton#NavItem:hover { background: #F0F2F5; }
-QPushButton#NavItem:hover:checked { background: #EAF0FE; }
-QPushButton#NavItem:disabled { color: #B4BAC3; }
+QPushButton#NavItem:hover { background: rgba(255,255,255,8); }
+QPushButton#NavItem:hover:checked { background: rgba(255,255,255,12); }
+QPushButton#NavItem:disabled { color: rgba(255,255,255,70); }
 """
 
 
@@ -118,7 +120,6 @@ from .. import models
 from ..config import AppConfig
 from ..exporters import export_all
 from . import platform
-from .ui import QSS
 from .worker import AgentWorker, ModelFetchWorker, filter_vision_models
 
 # 文件类型图标配色(TXT / IMG / VID)
@@ -179,7 +180,7 @@ class FileItemWidget(QWidget):
         else:
             display = os.path.basename(path)
         name = QLabel(display)
-        name.setStyleSheet("color:#1F2329;font-size:13px;")
+        name.setStyleSheet("color:rgba(255,255,255,230);font-size:13px;")
         name.setMinimumWidth(120)
         name.setToolTip(path)
         lay.addWidget(name, 1)
@@ -192,7 +193,7 @@ class FileItemWidget(QWidget):
             except OSError:
                 sz = ""
         size_lbl = QLabel(sz)
-        size_lbl.setStyleSheet("color:#9AA1AC;font-size:11px;")
+        size_lbl.setStyleSheet("color:rgba(255,255,255,90);font-size:11px;")
         size_lbl.setMinimumWidth(60)
         size_lbl.setAlignment(Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter)
         lay.addWidget(size_lbl)
@@ -202,8 +203,8 @@ class FileItemWidget(QWidget):
         btn.setFixedSize(20, 20)
         btn.setCursor(Qt.CursorShape.PointingHandCursor)
         btn.setStyleSheet(
-            "QPushButton{background:transparent;border:none;color:#B4BAC3;font-size:14px;}"
-            "QPushButton:hover{color:#C0392B;}"
+            "QPushButton{background:transparent;border:none;color:rgba(255,255,255,70);font-size:14px;}"
+            "QPushButton:hover{color:#E53935;}"
         )
         btn.clicked.connect(lambda: self.remove_clicked.emit(self._parent_item))
         lay.addWidget(btn)
@@ -287,10 +288,10 @@ class StepIndicator(QWidget):
             dot = QLabel("✓")
             dot.setFixedSize(18, 18)
             dot.setAlignment(Qt.AlignmentFlag.AlignCenter)
-            dot.setStyleSheet("color:#9AA1AC;background:#E5E7EB;border-radius:9px;font-size:10px;font-weight:500;")
+            dot.setStyleSheet("color:rgba(255,255,255,90);background:rgba(255,255,255,30);border-radius:9px;font-size:10px;font-weight:500;")
             lay.addWidget(dot)
             lbl = QLabel(name)
-            lbl.setStyleSheet("color:#8A919E;font-size:12px;")
+            lbl.setStyleSheet("color:rgba(255,255,255,110);font-size:12px;")
             lay.addWidget(lbl)
             self._dots.append((dot, lbl))
         self.set_current(0)
@@ -300,22 +301,22 @@ class StepIndicator(QWidget):
         for i, (dot, lbl) in enumerate(self._dots):
             if i < idx:
                 dot.setText("✓")
-                dot.setStyleSheet("color:#FFFFFF;background:#0F8A6B;border-radius:9px;font-size:10px;font-weight:500;")
-                lbl.setStyleSheet("color:#5A6270;font-size:12px;")
+                dot.setStyleSheet("color:#FFFFFF;background:#43A047;border-radius:9px;font-size:10px;font-weight:500;")
+                lbl.setStyleSheet("color:rgba(255,255,255,150);font-size:12px;")
             elif i == idx:
                 dot.setText(str(i + 1))
-                dot.setStyleSheet("color:#FFFFFF;background:#2F4FC4;border-radius:9px;font-size:10px;font-weight:500;")
-                lbl.setStyleSheet("color:#2F4FC4;font-size:12px;font-weight:500;")
+                dot.setStyleSheet("color:#FFFFFF;background:#FFD54F;border-radius:9px;font-size:10px;font-weight:500;")
+                lbl.setStyleSheet("color:#FFD54F;font-size:12px;font-weight:500;")
             else:
                 dot.setText(str(i + 1))
-                dot.setStyleSheet("color:#9AA1AC;background:#E5E7EB;border-radius:9px;font-size:10px;font-weight:500;")
-                lbl.setStyleSheet("color:#8A919E;font-size:12px;")
+                dot.setStyleSheet("color:rgba(255,255,255,90);background:rgba(255,255,255,30);border-radius:9px;font-size:10px;font-weight:500;")
+                lbl.setStyleSheet("color:rgba(255,255,255,110);font-size:12px;")
 
     def reset(self):
         for i, (dot, lbl) in enumerate(self._dots):
             dot.setText(str(i + 1))
-            dot.setStyleSheet("color:#9AA1AC;background:#E5E7EB;border-radius:9px;font-size:10px;font-weight:500;")
-            lbl.setStyleSheet("color:#8A919E;font-size:12px;")
+            dot.setStyleSheet("color:rgba(255,255,255,90);background:rgba(255,255,255,30);border-radius:9px;font-size:10px;font-weight:500;")
+            lbl.setStyleSheet("color:rgba(255,255,255,110);font-size:12px;")
 
 
 def _card(title: str) -> tuple[QWidget, QVBoxLayout]:
@@ -326,7 +327,7 @@ def _card(title: str) -> tuple[QWidget, QVBoxLayout]:
     lay.setSpacing(7)
     t = QLabel(title)
     t.setObjectName("CardTitle")
-    t.setStyleSheet("font-size:14px;font-weight:600;color:#1F2329;margin-bottom:2px;")
+    t.setStyleSheet("font-size:14px;font-weight:600;color:rgba(255,255,255,230);margin-bottom:2px;")
     t.setMinimumWidth(80)  # 防标题被压缩显示成单字
     lay.addWidget(t)
     return w, lay
@@ -335,7 +336,7 @@ def _card(title: str) -> tuple[QWidget, QVBoxLayout]:
 def _label(text: str) -> QLabel:
     lbl = QLabel(text)
     lbl.setProperty("class", "formlabel")
-    lbl.setStyleSheet("font-size:12px;color:#5A6270;")
+    lbl.setStyleSheet("font-size:12px;color:rgba(255,255,255,150);")
     lbl.setMinimumWidth(60)  # 防 label 被压缩显示成单字
     return lbl
 
@@ -343,7 +344,7 @@ def _label(text: str) -> QLabel:
 def _page_title(text: str) -> QLabel:
     """模块页面大标题。"""
     lbl = QLabel(text)
-    lbl.setStyleSheet("font-size:16px;font-weight:600;color:#1F2329;")
+    lbl.setStyleSheet("font-size:16px;font-weight:600;color:rgba(255,255,255,230);")
     return lbl
 
 
@@ -361,8 +362,12 @@ class MainWindow(QMainWindow):
         self._nav_items: List[QPushButton] = []
         self._cur_stage = 0
         self._total_stage = 3
+        self._drag_pos: Optional[QPoint] = None
 
-        central = QWidget()
+        # 无边框窗口(液态玻璃风格):拖动标题栏移动、双击最大化、Esc 关闭
+        self.setWindowFlags(Qt.WindowType.FramelessWindowHint | Qt.WindowType.Window)
+
+        central = BackgroundWidget()
         self.setCentralWidget(central)
         root = QVBoxLayout(central)
         root.setContentsMargins(0, 0, 0, 0)
@@ -383,6 +388,38 @@ class MainWindow(QMainWindow):
         self._refresh_export_buttons()
         self._on_nav_clicked(0)
         self._update_nav_state()
+        QShortcut(QKeySequence(Qt.Key.Key_Escape), self, self.close)
+
+    # ------------------------------------------------------------------ #
+    # 无边框窗口:标题栏拖动 / 双击最大化
+    # ------------------------------------------------------------------ #
+    def mousePressEvent(self, event):  # noqa: N802
+        if event.button() == Qt.MouseButton.LeftButton and event.position().y() <= 60:
+            self._drag_pos = event.globalPosition().toPoint() - self.frameGeometry().topLeft()
+            event.accept()
+
+    def mouseMoveEvent(self, event):  # noqa: N802
+        if self._drag_pos is not None and event.buttons() & Qt.MouseButton.LeftButton:
+            self.move(event.globalPosition().toPoint() - self._drag_pos)
+            event.accept()
+
+    def mouseReleaseEvent(self, event):  # noqa: N802
+        self._drag_pos = None
+        super().mouseReleaseEvent(event)
+
+    def mouseDoubleClickEvent(self, event):  # noqa: N802
+        if event.position().y() <= 60:
+            if self.isMaximized():
+                self.showNormal()
+            else:
+                self.showMaximized()
+            event.accept()
+
+    def _toggle_max(self):
+        if self.isMaximized():
+            self.showNormal()
+        else:
+            self.showMaximized()
 
     # ------------------------------------------------------------------ #
     # 构建
@@ -414,7 +451,7 @@ class MainWindow(QMainWindow):
 
         self._status_dot = QLabel()
         self._status_dot.setFixedSize(8, 8)
-        self._status_dot.setStyleSheet("background:#0F8A6B;border-radius:4px;")
+        self._status_dot.setStyleSheet("background:#43A047;border-radius:4px;")
         self._status_text = QLabel("就绪")
         self._status_text.setObjectName("StatusText")
         lay.addWidget(self._status_dot)
@@ -427,6 +464,27 @@ class MainWindow(QMainWindow):
         btn_load = QPushButton("加载配置")
         btn_load.clicked.connect(self._load_config)
         lay.addWidget(btn_load)
+
+        # 窗口控制按钮(无边框窗口)
+        lay.addSpacing(6)
+        sep = QLabel("|")
+        sep.setStyleSheet("color:rgba(255,255,255,40);")
+        lay.addWidget(sep)
+        b_min = QPushButton("—")
+        b_min.setObjectName("WindowBtn")
+        b_min.setToolTip("最小化")
+        b_min.clicked.connect(self.showMinimized)
+        lay.addWidget(b_min)
+        b_max = QPushButton("□")
+        b_max.setObjectName("WindowBtn")
+        b_max.setToolTip("最大化 / 还原")
+        b_max.clicked.connect(self._toggle_max)
+        lay.addWidget(b_max)
+        b_close = QPushButton("✕")
+        b_close.setObjectName("WindowBtnClose")
+        b_close.setToolTip("关闭")
+        b_close.clicked.connect(self.close)
+        lay.addWidget(b_close)
         return bar
 
     def _build_nav(self) -> QWidget:
@@ -434,7 +492,7 @@ class MainWindow(QMainWindow):
         nav = QWidget()
         nav.setFixedWidth(140)
         nav.setObjectName("NavPanel")
-        nav.setStyleSheet("QWidget#NavPanel{background:#F1EFE8;border-right:1px solid #E5E7EB;}")
+        nav.setStyleSheet("QWidget#NavPanel{background:rgba(255,255,255,8);border-right:1px solid rgba(255,255,255,30);}")
         lay = QVBoxLayout(nav)
         lay.setContentsMargins(8, 14, 8, 14)
         lay.setSpacing(6)
@@ -472,7 +530,7 @@ class MainWindow(QMainWindow):
         head = QHBoxLayout()
         head.addWidget(_page_title("素材"))
         self._count_lbl = QLabel("0")
-        self._count_lbl.setStyleSheet("color:#2F4FC4;font-size:13px;font-weight:500;")
+        self._count_lbl.setStyleSheet("color:#FFD54F;font-size:13px;font-weight:500;")
         head.addWidget(self._count_lbl)
         head.addStretch(1)
         lay.addLayout(head)
@@ -496,7 +554,7 @@ class MainWindow(QMainWindow):
         lay.addLayout(btns)
 
         hint = QLabel("拖拽文件到列表,或点击添加 · 支持 Figma / MasterGo 原型图链接")
-        hint.setStyleSheet("color:#8A919E;font-size:11px;border:1px dashed #CDD3DB;border-radius:8px;padding:8px;background:#FBFBFC;")
+        hint.setStyleSheet("color:rgba(255,255,255,110);font-size:11px;border:1px dashed rgba(255,255,255,40);border-radius:8px;padding:8px;background:rgba(255,255,255,10);")
         hint.setAlignment(Qt.AlignmentFlag.AlignCenter)
         lay.addWidget(hint)
 
@@ -595,7 +653,7 @@ class MainWindow(QMainWindow):
 
         # 拉取状态提示(只显示运行时状态,不显示静态提示文字,避免冗余)
         self._fetch_hint = QLabel(" ")
-        self._fetch_hint.setStyleSheet("color:#9AA1AC;font-size:11px;")
+        self._fetch_hint.setStyleSheet("color:rgba(255,255,255,90);font-size:11px;")
         self._fetch_hint.setWordWrap(True)
         self._fetch_hint.setMinimumWidth(0)
 
@@ -682,15 +740,15 @@ class MainWindow(QMainWindow):
         lay.addWidget(self._progress)
 
         self._stage_text = QLabel("等待开始…")
-        self._stage_text.setStyleSheet("color:#8A919E;font-size:13px;font-weight:500;")
+        self._stage_text.setStyleSheet("color:rgba(255,255,255,110);font-size:13px;font-weight:500;")
         lay.addWidget(self._stage_text)
 
         lay.addWidget(_label("实时日志"))
         self._log_view = QPlainTextEdit()
         self._log_view.setReadOnly(True)
         self._log_view.setStyleSheet(
-            "background:#FBFBFC;border:1px solid #E5E7EB;border-radius:6px;"
-            "font-family:Consolas,Menlo,monospace;font-size:11px;color:#5A6270;")
+            "background:rgba(255,255,255,10);border:1px solid rgba(255,255,255,30);border-radius:6px;"
+            "font-family:Consolas,Menlo,monospace;font-size:11px;color:rgba(255,255,255,150);")
         lay.addWidget(self._log_view, 1)
 
         self._btn_run = QPushButton("开始生成")
