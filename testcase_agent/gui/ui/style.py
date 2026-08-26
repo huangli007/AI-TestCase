@@ -317,4 +317,14 @@ QScrollBar::add-line, QScrollBar::sub-line {
 QScrollBar::add-page, QScrollBar::sub-page {
     background: transparent;
 }
+
+/* ============ 容器透明(让暗紫玻璃背景透出,避免白屏) ============ */
+QScrollArea,
+QScrollArea > QWidget > QWidget,
+QStackedWidget,
+QStackedWidget > QWidget,
+QWidget#MainBody {
+    background: transparent;
+    border: none;
+}
 """
