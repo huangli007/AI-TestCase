@@ -134,7 +134,11 @@ def browser_screenshot(url: str, out_path: str, timeout: int = 45) -> None:
                 route.abort() if route.request.resource_type in ("font", "media")
                 else route.continue_()))
             page.goto(url, wait_until="commit", timeout=min(timeout, 40) * 1000)
-            page.add_style_tag(content="*{font-family:'Segoe UI',Arial,sans-serif !important;}")
+            # 注入本地字体样式(容错:页面 DOM 结构异常时跳过,不影响截图)
+            try:
+                page.add_style_tag(content="*{font-family:'Segoe UI',Arial,sans-serif !important;}")
+            except Exception:  # noqa: BLE001
+                pass
             page.wait_for_timeout(6000)
             try:
                 page.wait_for_selector("body", timeout=3000)

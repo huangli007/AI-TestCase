@@ -57,7 +57,12 @@ class LLMClient:
         for attempt in range(self.cfg.max_retries + 1):
             try:
                 resp = self.client.chat.completions.create(**kwargs)
-                content = resp.choices[0].message.content or ""
+                if resp is None:
+                    raise LLMError("模型接口返回为空响应")
+                try:
+                    content = resp.choices[0].message.content or ""
+                except (AttributeError, IndexError, TypeError) as e:
+                    raise LLMError(f"模型响应结构异常: {e}") from e
                 if content.strip():
                     return content
                 raise LLMError("模型返回了空内容")
